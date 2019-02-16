@@ -73,6 +73,13 @@ impl Gilrs {
         })
     }
 
+    pub fn get_fds(&self) -> Vec<i32> {
+        self.gamepads
+            .iter()
+            .map(|gamepad| gamepad.get_fd())
+            .collect()
+    }
+
     pub(crate) fn next_event(&mut self) -> Option<Event> {
         if let Some(event) = self.handle_hotplug() {
             return Some(event);
@@ -329,6 +336,10 @@ impl Gamepad {
         );
 
         Some(gamepad)
+    }
+
+    fn get_fd(&self) -> i32 {
+        self.fd
     }
 
     fn collect_axes_and_buttons(&mut self) {

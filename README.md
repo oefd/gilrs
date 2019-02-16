@@ -1,95 +1,47 @@
-GilRs - Game Input Library for Rust
-===================================
+# Why This Fork Exists
 
-[![pipeline status](https://gitlab.com/gilrs-project/gilrs/badges/master/pipeline.svg)](https://gitlab.com/gilrs-project/gilrs/commits/master)
-[![Crates.io](https://img.shields.io/crates/v/gilrs.svg)](https://crates.io/crates/gilrs)
-[![Documentation](https://docs.rs/gilrs/badge.svg)](https://docs.rs/gilrs/)
-[![Minimum rustc version](https://img.shields.io/badge/rustc-1.24.1+-yellow.svg)](https://gitlab.com/gilrs-project/gilrs)
+In my particular use case (a pair of input devices I wanted to read from at any time, but which would generally not be moving much) gilrs did exactly what I wanted (emit events in a nice format) but did so by requiring a busy loop that ate an entire CPU core even when the inputs were not moving. This was unfortunate.
 
-[**Documentation (master)**](https://gilrs-project.gitlab.io/gilrs/doc/gilrs/)
+## How it works
 
-GilRs abstract platform specific APIs to provide unified interfaces for working with gamepads.
+In order to prevent the need for a busy-loop this fork adds a `.get_fds()` method to `Gilrs` instances which can be used to get the `RawFd`s of the `/dev/input/event*` files backing the input devices. These fds are used internally by gilrs and can't be used directly with mio/epoll, but fortunately linux will let you `dup(2)` them and put your own polls on those to get the expected results.
 
-Main features:
+Just poll those fds until at least one is readable, and run through all events gilrs can extract, rinse and repeat.
 
-- Unified gamepad layout—buttons and axes are represented by familiar names
-- Support for SDL2 mappings including `SDL_GAMECONTROLLERCONFIG` environment
-  variable which Steam uses
-- Hotplugging—GilRs will try to assign new ID for new gamepads and reuse same
-  ID for gamepads which reconnected
-- Force feedback (rumble)
-- Power information (is gamepad wired, current battery status)
+**This breaks parts of gilrs**, just not parts I care about. At the least it interupts the hotplugging feature of gilrs.
 
-The project's main repository [is on GitLab](https://gitlab.com/gilrs-project/gilrs)
-although there is also a [GitHub mirror](https://github.com/Arvamer/gilrs).
-Please use GitLab's issue tracker and merge requests.
+## How it could work far better
 
-This repository contains submodule; after you clone it, don't forget to run
-`git submodule init; git submodule update` (or clone with `--recursive` flag)
-or you will get compile errors.
+Upstream Gilrs is already investigating [Add option for blocking reads](https://gitlab.com/gilrs-project/gilrs/issues/63) which would be much more cleanly, but this hack is fairly easy to set up and use for me in the interim.
 
-Example
--------
-
-```toml
-[dependencies]
-gilrs = "0.6.1"
-```
+## Example
 
 ```rust
-use gilrs::{Gilrs, Button, Event};
+use libc;
+use gilrs::{Event, Gilrs};
+use mio::*;
+use mio::unix::EventedFd;
 
-let mut gilrs = Gilrs::new().unwrap();
+fn main() {
+	let mut gilrs = Gilrs::new().unwrap();
 
-// Iterate over all connected gamepads
-for (_id, gamepad) in gilrs.gamepads() {
-    println!("{} is {:?}", gamepad.name(), gamepad.power_info());
-}
+	let poll = Poll::new().unwrap()
+	let mut events = Events::with_capacity(1024);
+	let token = Token(0);
 
-loop {
-    // Examine new events
-    while let Some(Event { id, event, time }) = gilrs.next_event() {
-        println!("{:?} New event from {}: {:?}", time, id, event);
-    }
+	loop {
+		// drain any events readable now
+		while let Some(Event { .. }) = gilrs.next_event() {
+			println!("got event");
+		}
 
-    // You can also use cached gamepad state
-    match gilrs.gamepad(0) {
-        Some(gamepad) if gamepad.is_pressed(Button::South) => {
-            println!("Button South is pressed (XBox - A, PS - X)");
-        }
-        _ => (),
-    }
-    # break;
+		// wait for `next_event` to be likely to yield again
+		for fd in gilrs.get_fds() {
+			let fd = unsafe { libc::dup(fd) };
+			let fd = EventedFd(&fd);
+			let _ = poll.register(&fd, token, Ready::readable(), PollOpt::edge());
+			poll.poll(&mut events, None).unwrap();
+		}
+	}
 }
 ```
-
-Supported features
-------------------
-
-|                  | Input | Hotplugging | Force feedback |
-|------------------|:-----:|:-----------:|:--------------:|
-| Linux            |   ✓   |      ✓      |        ✓       |
-| Windows (XInput) |   ✓   |      ✓      |        ✓       |
-| OS X             |   ✕   |      ✕      |        ✕       |
-| Emscripten       |   ✕   |      ✕      |       n/a      |
-| Android          |   ✕   |      ✕      |        ✕       |
-
-
-Platform specific notes
-======================
-
-Linux
------
-
-On Linux, GilRs read (and write, in case of force feedback) directly from appropriate
-`/dev/input/event*` file. This mean that user have to have read and write access to this file.
-On most distros it shouldn't be a problem, but if it is, you will have to create udev rule.
-
-To build GilRs, you will need pkg-config and libudev .pc file. On some
-distributions this file is packaged in separate archive (for example `libudev-dev` in Debian).
-
-License
-=======
-
-This project is licensed under the terms of both the Apache License (Version 2.0) and the MIT
-license. See LICENSE-APACHE and LICENSE-MIT for details.

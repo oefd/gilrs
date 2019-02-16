@@ -134,6 +134,10 @@ impl Gilrs {
         GilrsBuilder::new().build()
     }
 
+    pub fn get_fds(&self) -> Vec<i32> {
+        self.inner.get_fds()
+    }
+
     /// Returns next pending event.
     pub fn next_event(&mut self) -> Option<Event> {
         use ev::filter::{axis_dpad_to_button, deadzone, Filter, Jitter};

@@ -163,6 +163,10 @@ impl Gilrs {
         Ok(Gilrs { inner })
     }
 
+    pub fn get_fds(&self) -> Vec<i32> {
+        self.inner.get_fds()
+    }
+
     /// Returns oldest event or `None` if all events were processed.
     pub fn next_event(&mut self) -> Option<Event> {
         self.inner.next_event()

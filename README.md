@@ -36,11 +36,22 @@ fn main() {
 		}
 
 		// wait for `next_event` to be likely to yield again
-		for fd in gilrs.get_fds() {
+		let raw_fds = gilrs.get_fds();
+		let ev_fds = raw_fds.iter().map(|fd| 
 			let fd = unsafe { libc::dup(fd) };
-			let fd = EventedFd(&fd);
+			EventedFd(&fd)
+		);
+		for fd in ev_fds.iter() {
 			let _ = poll.register(&fd, token, Ready::readable(), PollOpt::edge());
-			poll.poll(&mut events, None).unwrap();
+		}
+		poll.poll(&mut events, None).unwrap();
+
+		// cleanup the last polling
+		for fd in ev_fds.iter() {
+			let _ = poll.deregister(&fd);
+		}
+		for fd in raw_fds.iter() {
+			unsafe { libc::close(fd) };
 		}
 	}
 }
